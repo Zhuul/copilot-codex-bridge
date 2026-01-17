@@ -1,4 +1,8 @@
 {
+  "repository": {
+  "type": "git",
+  "url": "https://github.com/Zhuul/copilot-codex-bridge.git"
+ },
   "name": "copilot-codex-bridge",
   "displayName": "copilot-codex-bridge",
   "description": "Copilot Codex bridge using JavaScript",
@@ -9,7 +13,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "*"
+  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [{
@@ -31,3 +37,4 @@
     "@vscode/test-electron": "^2.5.2"
   }
 }
+
