@@ -1,8 +1,8 @@
 {
   "repository": {
-  "type": "git",
-  "url": "https://github.com/Zhuul/copilot-codex-bridge.git"
- },
+    "type": "git",
+    "url": "https://github.com/Zhuul/copilot-codex-bridge.git"
+  },
   "name": "copilot-codex-bridge",
   "displayName": "copilot-codex-bridge",
   "description": "Copilot Codex bridge using JavaScript",
@@ -13,16 +13,17 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "*"
-  ],
   "main": "./extension.js",
   "contributes": {
-    "commands": [{
-      "command": "copilot-codex-bridge.helloWorld",
-      "title": "Hello World"
-    }]
-  },
+  "commands": [{
+    "command": "copilot-codex-bridge.codexQuery",
+    "title": "Query Codex"
+   }],
+  "chat": [{
+    "id": "copilot-codex-bridge",
+    "name": "CODEX Bridge"
+   }]
+ },
   "scripts": {
     "lint": "eslint .",
     "pretest": "npm run lint",
@@ -37,4 +38,3 @@
     "@vscode/test-electron": "^2.5.2"
   }
 }
-
