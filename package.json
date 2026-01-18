@@ -4,12 +4,17 @@
     "url": "https://github.com/Zhuul/copilot-codex-bridge.git"
   },
   "name": "copilot-codex-bridge",
+  "publisher": "zhuul",
   "displayName": "copilot-codex-bridge",
   "description": "Copilot Codex bridge using JavaScript",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.108.1"
   },
+  "activationEvents": [
+    "onChatParticipant:copilot-codex-bridge",
+    "onCommand:copilot-codex-bridge.codexQuery"
+  ],
   "categories": [
     "Other"
   ],
@@ -22,7 +27,17 @@
   "chat": [{
     "id": "copilot-codex-bridge",
     "name": "CODEX Bridge"
-   }]
+   }],
+   "configuration": {
+     "title": "Copilot Codex Bridge",
+     "properties": {
+       "codexBridge.path": {
+         "type": "string",
+         "markdownDescription": "Absolute path to an external bridge CLI. If empty, the extension uses the bundled `bridge-echo.js`. You can also set the environment variables `CODEX_BRIDGE_PATH` or `CODEX_CLI_PATH`.",
+         "default": ""
+       }
+     }
+   }
  },
   "scripts": {
     "lint": "eslint .",

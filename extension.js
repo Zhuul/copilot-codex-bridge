@@ -3,11 +3,19 @@ const cp = require('child_process');
 const path = require('path');
 const readline = require('readline');
 
-function runShell(command, cwd) {
+function runShell(command, cwd, token) {
   return new Promise((resolve) => {
-    cp.exec(command, { cwd, shell: true, windowsHide: true }, (error, stdout, stderr) => {
+    const child = cp.exec(command, { cwd, shell: true, windowsHide: true }, (error, stdout, stderr) => {
       resolve({ code: error && typeof error.code === 'number' ? error.code : 0, stdout, stderr });
     });
+    if (token) {
+      if (token.isCancellationRequested) {
+        try { child.kill(); } catch {}
+      }
+      token.onCancellationRequested(() => {
+        try { child.kill(); } catch {}
+      });
+    }
   });
 }
 
@@ -16,8 +24,13 @@ function activate(context) {
   let bridgeInstance;
   function getBridge() {
     if (bridgeInstance) return bridgeInstance;
-    const scriptPath = path.join(context.extensionUri.fsPath, 'bridge-echo.js');
-    const child = cp.fork(scriptPath, [], { silent: true });
+    const cfg = vscode.workspace.getConfiguration();
+    const configuredPath = cfg.get('codexBridge.path');
+    const envPath = process.env.CODEX_BRIDGE_PATH || process.env.CODEX_CLI_PATH;
+    const resolved = configuredPath || envPath || path.join(context.extensionUri.fsPath, 'bridge-echo.js');
+    // Use fork for Node scripts, spawn otherwise
+    const useFork = resolved.endsWith('.js') && !resolved.endsWith('.mjs');
+    const child = useFork ? cp.fork(resolved, [], { silent: true }) : cp.spawn(resolved, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     const pending = new Map(); // id -> handler(payload) => boolean done
 
@@ -41,10 +54,10 @@ function activate(context) {
       }
     });
 
-    child.on('error', () => {
+    child.on('error', (err) => {
       // Best-effort: fail any pending requests
       for (const [, handler] of pending) {
-        try { handler({ type: 'error', text: 'bridge error' }); } catch {}
+        try { handler({ type: 'error', text: `bridge error: ${err && err.message || String(err)}` }); } catch {}
       }
       pending.clear();
     });
@@ -90,7 +103,7 @@ function activate(context) {
     return bridgeInstance;
   }
 
-  const participant = vscode.chat.createChatParticipant('copilot-codex-bridge', async (request, context, response) => {
+  const participant = vscode.chat.createChatParticipant('copilot-codex-bridge', async (request, context, response, token) => {
     const prompt = (request.prompt || '').trim();
 
     if (prompt.startsWith('/exec ')) {
@@ -100,7 +113,7 @@ function activate(context) {
         : undefined;
       response.markdown(`cwd: ${cwd || process.cwd()}`);
       response.markdown(`$ ${cmd}`);
-      const { code, stdout, stderr } = await runShell(cmd, cwd);
+      const { code, stdout, stderr } = await runShell(cmd, cwd, token);
       if (stdout) response.markdown(['```', stdout, '```'].join('\n'));
       if (stderr) response.markdown(['stderr:', '```', stderr, '```'].join('\n'));
       if (code !== 0) response.markdown(`Process exited with code ${code}`);
@@ -113,12 +126,25 @@ function activate(context) {
     if (query) {
       response.markdown('Sending to Codex bridge…');
       const bridge = getBridge();
+      let cancelled = false;
+      if (token) {
+        if (token.isCancellationRequested) cancelled = true;
+        token.onCancellationRequested(() => { cancelled = true; });
+      }
       bridge.send(query, (payload) => {
-        const kind = payload && payload.type || 'message';
-        const text = payload && payload.text || '';
+        if (cancelled) {
+          response.markdown('Cancelled');
+          return true;
+        }
+        const kind = (payload && payload.type) || 'message';
+        const text = (payload && payload.text) || '';
+        if (kind === 'codex_delta') {
+          response.markdown(text);
+          return false; // keep streaming
+        }
         if (kind === 'codex_reply') {
           response.markdown(text);
-          return true; // done for echo bridge
+          return true; // done
         }
         if (kind === 'timeout') {
           response.markdown('Bridge timed out.');
