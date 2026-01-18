@@ -98,6 +98,7 @@ function activate(context) {
       const cwd = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
         ? vscode.workspace.workspaceFolders[0].uri.fsPath
         : undefined;
+      response.markdown(`cwd: ${cwd || process.cwd()}`);
       response.markdown(`$ ${cmd}`);
       const { code, stdout, stderr } = await runShell(cmd, cwd);
       if (stdout) response.markdown(['```', stdout, '```'].join('\n'));
@@ -106,8 +107,10 @@ function activate(context) {
       return;
     }
 
-    if (prompt.startsWith('/codex ')) {
-      const query = prompt.replace('/codex ', '');
+    // Default routing: anything not /exec or /copilot goes to the bridge.
+    const isCodexPrefixed = prompt.startsWith('/codex ');
+    const query = isCodexPrefixed ? prompt.slice(7).trim() : prompt;
+    if (query) {
       response.markdown('Sending to Codex bridge…');
       const bridge = getBridge();
       bridge.send(query, (payload) => {
@@ -142,7 +145,7 @@ function activate(context) {
       return;
     }
 
-    response.markdown('Use /exec to run shell commands, /codex to talk to the bridge, or /copilot to route messages.');
+    response.markdown('Use /exec to run shell commands, or just type to talk to the bridge. Use /copilot to route messages.');
   });
 
   context.subscriptions.push(participant);
