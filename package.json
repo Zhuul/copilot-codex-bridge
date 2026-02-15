@@ -6,7 +6,7 @@
   "name": "copilot-codex-bridge",
   "publisher": "zhuul",
   "displayName": "copilot-codex-bridge",
-  "description": "Copilot Codex bridge using JavaScript",
+  "description": "[ARCHIVED] Copilot Codex bridge using JavaScript - No longer maintained",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.108.1"
