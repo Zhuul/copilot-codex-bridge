@@ -32,7 +32,14 @@ function activate(context) {
     const useFork = resolved.endsWith('.js') && !resolved.endsWith('.mjs');
     const child = useFork ? cp.fork(resolved, [], { silent: true }) : cp.spawn(resolved, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
-    const pending = new Map(); // id -> handler(payload) => boolean done
+    const pending = new Map(); // id -> { handler, timeout }
+
+    function clearPending(id) {
+      const entry = pending.get(id);
+      if (!entry) return;
+      clearTimeout(entry.timeout);
+      pending.delete(id);
+    }
 
     rl.on('line', (line) => {
       const raw = (line || '').trim();
@@ -41,12 +48,12 @@ function activate(context) {
         const payload = JSON.parse(raw);
         const id = payload && payload.id;
         if (id && pending.has(id)) {
-          const handler = pending.get(id);
+          const { handler } = pending.get(id);
           try {
             const done = handler(payload) === true;
-            if (done || payload.type === 'codex_reply') pending.delete(id);
+            if (done || payload.type === 'codex_reply') clearPending(id);
           } catch {
-            pending.delete(id);
+            clearPending(id);
           }
         }
       } catch {
@@ -56,40 +63,45 @@ function activate(context) {
 
     child.on('error', (err) => {
       // Best-effort: fail any pending requests
-      for (const [, handler] of pending) {
-        try { handler({ type: 'error', text: `bridge error: ${err && err.message || String(err)}` }); } catch {}
+      for (const [id, entry] of pending) {
+        try { entry.handler({ type: 'error', text: `bridge error: ${err && err.message || String(err)}` }); } catch {}
+        clearPending(id);
       }
-      pending.clear();
     });
 
     child.on('exit', () => {
-      for (const [, handler] of pending) {
-        try { handler({ type: 'error', text: 'bridge exited' }); } catch {}
+      for (const [id, entry] of pending) {
+        try { entry.handler({ type: 'error', text: 'bridge exited' }); } catch {}
+        clearPending(id);
       }
-      pending.clear();
     });
 
     function send(text, handler) {
       const id = Math.random().toString(36).slice(2);
-      if (typeof handler === 'function') pending.set(id, handler);
+      let timeout;
+      if (typeof handler === 'function') {
+        timeout = setTimeout(() => {
+          if (!pending.has(id)) return;
+          const entry = pending.get(id);
+          try { entry.handler({ type: 'timeout', text: 'No response from bridge' }); } catch {}
+          clearPending(id);
+        }, 30000);
+        pending.set(id, { handler, timeout });
+      }
       const payload = { id, text };
       try {
         child.stdin.write(JSON.stringify(payload) + '\n');
       } catch (e) {
         if (pending.has(id)) {
-          try { handler({ type: 'error', text: String(e && e.message || e) }); } catch {}
-          pending.delete(id);
+          const entry = pending.get(id);
+          try { entry.handler({ type: 'error', text: String(e && e.message || e) }); } catch {}
+          clearPending(id);
         }
       }
-      // Safety timeout to avoid leaks
-      setTimeout(() => {
-        if (pending.has(id)) {
-          const h = pending.get(id);
-          try { h({ type: 'timeout', text: 'No response from bridge' }); } catch {}
-          pending.delete(id);
-        }
-      }, 30000);
-      return id;
+      return {
+        id,
+        cancel: () => clearPending(id),
+      };
     }
 
     function dispose() {
@@ -120,22 +132,24 @@ function activate(context) {
       return;
     }
 
+    if (prompt.startsWith('/copilot ')) {
+      const query = prompt.replace('/copilot ', '');
+      const copilot = vscode.extensions.getExtension('GitHub.copilot-chat');
+      if (copilot) {
+        response.markdown(`Forwarding to Copilot (open its chat and send): ${query}`);
+      } else {
+        response.markdown('Copilot Chat extension not detected. Please enable it and try again.');
+      }
+      return;
+    }
+
     // Default routing: anything not /exec or /copilot goes to the bridge.
     const isCodexPrefixed = prompt.startsWith('/codex ');
     const query = isCodexPrefixed ? prompt.slice(7).trim() : prompt;
     if (query) {
       response.markdown('Sending to Codex bridge…');
       const bridge = getBridge();
-      let cancelled = false;
-      if (token) {
-        if (token.isCancellationRequested) cancelled = true;
-        token.onCancellationRequested(() => { cancelled = true; });
-      }
-      bridge.send(query, (payload) => {
-        if (cancelled) {
-          response.markdown('Cancelled');
-          return true;
-        }
+      const requestHandle = bridge.send(query, (payload) => {
         const kind = (payload && payload.type) || 'message';
         const text = (payload && payload.text) || '';
         if (kind === 'codex_delta') {
@@ -157,16 +171,16 @@ function activate(context) {
         response.markdown(`${kind}: ${text}`);
         return false;
       });
-      return;
-    }
-
-    if (prompt.startsWith('/copilot ')) {
-      const query = prompt.replace('/copilot ', '');
-      const copilot = vscode.extensions.getExtension('GitHub.copilot-chat');
-      if (copilot) {
-        response.markdown(`Forwarding to Copilot (open its chat and send): ${query}`);
-      } else {
-        response.markdown('Copilot Chat extension not detected. Please enable it and try again.');
+      if (token) {
+        if (token.isCancellationRequested) {
+          requestHandle.cancel();
+          response.markdown('Cancelled');
+          return;
+        }
+        token.onCancellationRequested(() => {
+          requestHandle.cancel();
+          response.markdown('Cancelled');
+        });
       }
       return;
     }
