@@ -6,4 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Deprecated
+- This project is now archived and no longer maintained
+- No further updates or bug fixes will be provided
+
+## [0.0.1] - Initial Release
+
 - Initial release
